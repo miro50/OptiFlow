@@ -1,5 +1,24 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Database } from './db';
+
+// Mock Supabase Client API for Vitest hermetic executions
+vi.mock('./supabaseClient', () => {
+  return {
+    supabase: {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
+      },
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockReturnThis(),
+        upsert: vi.fn().mockResolvedValue({ data: null, error: null }),
+        insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+        delete: vi.fn().mockReturnThis(),
+      }),
+    },
+  };
+});
 
 // Mock localStorage for Node environment running Vitest
 const localStorageMock = (() => {
