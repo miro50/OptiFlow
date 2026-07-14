@@ -1,3 +1,5 @@
+import { supabase } from './supabaseClient';
+
 // Types & Interfaces
 
 export interface Tenant {
@@ -57,7 +59,134 @@ export interface CSVColumnMapping {
   descriptionCol: string;
 }
 
+// -------------------------------------------------------------
+// Supabase Data Type Converters
+// -------------------------------------------------------------
+
+function toSupabaseTenant(t: Tenant) {
+  return {
+    id: t.id,
+    company_name: t.companyName,
+    vat_number: t.vatNumber,
+    fiscal_address: t.fiscalAddress,
+    created_at: t.created_at,
+  };
+}
+
+function fromSupabaseTenant(row: any): Tenant {
+  return {
+    id: row.id,
+    companyName: row.company_name,
+    vatNumber: row.vat_number,
+    fiscalAddress: row.fiscal_address,
+    created_at: row.created_at,
+  };
+}
+
+function toSupabaseSupplier(s: Supplier) {
+  return {
+    id: s.id,
+    tenant_id: s.tenant_id,
+    name: s.name,
+    email: s.email,
+    payment_terms: s.paymentTerms,
+    created_at: s.created_at,
+  };
+}
+
+function fromSupabaseSupplier(row: any): Supplier {
+  return {
+    id: row.id,
+    tenant_id: row.tenant_id,
+    name: row.name,
+    email: row.email,
+    paymentTerms: row.payment_terms,
+    created_at: row.created_at,
+  };
+}
+
+function toSupabaseSKU(s: SKU) {
+  return {
+    id: s.id,
+    tenant_id: s.tenant_id,
+    code: s.code,
+    description: s.description,
+    supplier_id: s.supplierId,
+    unit_cost: s.unitCost,
+    min_stock: s.minStock,
+    max_stock: s.maxStock,
+    lot_size_moq: s.lotSizeMOQ,
+    lead_time_days: s.leadTimeDays,
+    current_stock: s.currentStock,
+    created_at: s.created_at,
+  };
+}
+
+function fromSupabaseSKU(row: any): SKU {
+  return {
+    id: row.id,
+    tenant_id: row.tenant_id,
+    code: row.code,
+    description: row.description,
+    supplierId: row.supplier_id,
+    unitCost: Number(row.unit_cost),
+    minStock: Number(row.min_stock),
+    maxStock: Number(row.max_stock),
+    lotSizeMOQ: Number(row.lot_size_moq),
+    leadTimeDays: Number(row.lead_time_days),
+    currentStock: Number(row.current_stock),
+    created_at: row.created_at,
+  };
+}
+
+function toSupabasePO(o: PurchaseOrder) {
+  return {
+    id: o.id,
+    tenant_id: o.tenant_id,
+    supplier_id: o.supplierId,
+    status: o.status,
+    total_amount: o.totalAmount,
+    sent_at: o.sentAt || null,
+    created_at: o.created_at,
+  };
+}
+
+function fromSupabasePO(row: any, items: any[] = []): PurchaseOrder {
+  return {
+    id: row.id,
+    tenant_id: row.tenant_id,
+    supplierId: row.supplier_id,
+    status: row.status as PurchaseOrder['status'],
+    totalAmount: Number(row.total_amount),
+    sentAt: row.sent_at || undefined,
+    created_at: row.created_at,
+    items: items.map(fromSupabasePOItem),
+  };
+}
+
+function toSupabasePOItem(i: PurchaseOrderItem) {
+  return {
+    id: i.id,
+    po_id: i.poId,
+    sku_code: i.skuCode,
+    quantity: i.quantity,
+    unit_cost: i.unitCost,
+  };
+}
+
+function fromSupabasePOItem(row: any): PurchaseOrderItem {
+  return {
+    id: row.id,
+    poId: row.po_id,
+    skuCode: row.sku_code,
+    quantity: Number(row.quantity),
+    unitCost: Number(row.unit_cost),
+  };
+}
+
+// -------------------------------------------------------------
 // Seed Data & Database Initializer
+// -------------------------------------------------------------
 
 const DEFAULT_TENANT: Tenant = {
   id: 'tenant-rossi',
@@ -151,8 +280,68 @@ const DEFAULT_COLUMN_MAPPING: CSVColumnMapping = {
   descriptionCol: 'Descrizione Articolo',
 };
 
-// Database class helper acting as local database engine with localStorage replication
+// Database class helper acting as local database engine with Supabase hybrid sync cache
 export class Database {
+  // --- Supabase Sync Helpers ---
+  static async syncTenantToSupabase(tenant: Tenant): Promise<void> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await supabase.from('tenants').upsert(toSupabaseTenant(tenant));
+    } catch (e) {
+      console.error('Supabase write error (tenant):', e);
+    }
+  }
+
+  static async syncSupplierToSupabase(supplier: Supplier): Promise<void> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await supabase.from('suppliers').upsert(toSupabaseSupplier(supplier));
+    } catch (e) {
+      console.error('Supabase write error (supplier):', e);
+    }
+  }
+
+  static async syncSKUToSupabase(sku: SKU): Promise<void> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await supabase.from('skus').upsert(toSupabaseSKU(sku));
+    } catch (e) {
+      console.error('Supabase write error (sku):', e);
+    }
+  }
+
+  static async syncPurchaseOrderToSupabase(po: PurchaseOrder): Promise<void> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await supabase.from('purchase_orders').upsert(toSupabasePO(po));
+      if (po.items) {
+        await supabase.from('purchase_order_items').delete().eq('po_id', po.id);
+        await supabase.from('purchase_order_items').insert(po.items.map(toSupabasePOItem));
+      }
+    } catch (e) {
+      console.error('Supabase write error (purchase_order):', e);
+    }
+  }
+
+  static async syncSettingsToSupabase(mapping: CSVColumnMapping): Promise<void> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const tenantId = this.getTenant().id;
+      await supabase.from('tenant_settings').upsert({
+        tenant_id: tenantId,
+        csv_column_mapping: mapping
+      });
+    } catch (e) {
+      console.error('Supabase write error (tenant_settings):', e);
+    }
+  }
+
+  // --- CRUD DB Client Interfaces ---
   static getTenant(): Tenant {
     const tenant = localStorage.getItem('previso_tenant');
     if (!tenant) {
@@ -181,6 +370,7 @@ export class Database {
     };
     suppliers.push(newSupplier);
     localStorage.setItem('previso_suppliers', JSON.stringify(suppliers));
+    this.syncSupplierToSupabase(newSupplier);
     return newSupplier;
   }
 
@@ -195,6 +385,7 @@ export class Database {
 
   static saveSKUs(skus: SKU[]): void {
     localStorage.setItem('previso_skus', JSON.stringify(skus));
+    skus.forEach(sku => this.syncSKUToSupabase(sku));
   }
 
   static addSKU(sku: Omit<SKU, 'id' | 'tenant_id' | 'created_at'>): SKU {
@@ -230,6 +421,7 @@ export class Database {
 
   static saveColumnMapping(mapping: CSVColumnMapping): void {
     localStorage.setItem('previso_mapping', JSON.stringify(mapping));
+    this.syncSettingsToSupabase(mapping);
   }
 
   static getPurchaseOrders(): PurchaseOrder[] {
@@ -239,6 +431,7 @@ export class Database {
 
   static savePurchaseOrders(orders: PurchaseOrder[]): void {
     localStorage.setItem('previso_orders', JSON.stringify(orders));
+    orders.forEach(po => this.syncPurchaseOrderToSupabase(po));
   }
 
   // Calculate pending / on-order quantities per SKU code
@@ -320,7 +513,7 @@ export class Database {
 
   // Generate new Draft Purchase Orders from proposed replenishment suggestions
   static generateDraftOrders(
-    proposals: { supplierId: string; code: string; suggestedQty: number; unitCost: number }[]
+    proposals: { supplierId: string; code: string; suggestedQty: number; unitCost: number; skuId?: string }[]
   ): PurchaseOrder[] {
     const orders = this.getPurchaseOrders();
     
@@ -374,5 +567,101 @@ export class Database {
     localStorage.removeItem('previso_skus');
     localStorage.removeItem('previso_orders');
     localStorage.removeItem('previso_mapping');
+  }
+}
+
+// -------------------------------------------------------------
+// Supabase Sync Pull Handler
+// -------------------------------------------------------------
+
+export async function initializeSupabaseSync(): Promise<void> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      console.log('Supabase session not active. Operating in local-only mock mode.');
+      return;
+    }
+    
+    const userId = session.user.id;
+    
+    // Get tenant membership mapping
+    const { data: members, error: memberErr } = await supabase
+      .from('tenant_members')
+      .select('tenant_id')
+      .eq('user_id', userId);
+      
+    if (memberErr || !members || members.length === 0) {
+      console.warn('User has no active tenant memberships in Supabase.');
+      return;
+    }
+    
+    const tenantId = members[0].tenant_id;
+    
+    // 1. Pull tenant details
+    const { data: tenantRow } = await supabase
+      .from('tenants')
+      .select('*')
+      .eq('id', tenantId)
+      .single();
+      
+    if (tenantRow) {
+      localStorage.setItem('previso_tenant', JSON.stringify(fromSupabaseTenant(tenantRow)));
+    }
+    
+    // 2. Pull suppliers
+    const { data: supplierRows } = await supabase
+      .from('suppliers')
+      .select('*')
+      .eq('tenant_id', tenantId);
+      
+    if (supplierRows && supplierRows.length > 0) {
+      localStorage.setItem('previso_suppliers', JSON.stringify(supplierRows.map(fromSupabaseSupplier)));
+    } else {
+      // Seed suppliers if empty on remote
+      const localSuppliers = Database.getSuppliers();
+      const rows = localSuppliers.map(s => toSupabaseSupplier({ ...s, tenant_id: tenantId }));
+      await supabase.from('suppliers').insert(rows);
+    }
+    
+    // 3. Pull SKUs
+    const { data: skuRows } = await supabase
+      .from('skus')
+      .select('*')
+      .eq('tenant_id', tenantId);
+      
+    if (skuRows && skuRows.length > 0) {
+      localStorage.setItem('previso_skus', JSON.stringify(skuRows.map(fromSupabaseSKU)));
+    } else {
+      // Seed SKUs if empty on remote
+      const localSKUs = Database.getSKUs();
+      const rows = localSKUs.map(s => toSupabaseSKU({ ...s, tenant_id: tenantId }));
+      await supabase.from('skus').insert(rows);
+    }
+    
+    // 4. Pull Purchase Orders
+    const { data: poRows } = await supabase
+      .from('purchase_orders')
+      .select('*, purchase_order_items(*)')
+      .eq('tenant_id', tenantId);
+      
+    if (poRows) {
+      const orders = poRows.map(row => fromSupabasePO(row, row.purchase_order_items));
+      localStorage.setItem('previso_orders', JSON.stringify(orders));
+    }
+    
+    // 5. Pull column mapping mapping
+    const { data: settingsRow } = await supabase
+      .from('tenant_settings')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .single();
+      
+    if (settingsRow) {
+      localStorage.setItem('previso_mapping', JSON.stringify(settingsRow.csv_column_mapping));
+    }
+    
+    console.log('Supabase sync completed successfully.');
+  } catch (err) {
+    console.error('Error during Supabase initialization sync:', err);
   }
 }
