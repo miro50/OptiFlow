@@ -1,0 +1,37 @@
+# Previso — Replenishment Autopilot per SME italiane
+
+Questo file contiene i comandi utili per lo sviluppo e i test, e le regole di skill routing per l'assistente AI.
+
+## Commands
+
+- **Avvio Server di Sviluppo:** `npm run dev` (porta locale 5173)
+- **Compilazione di Produzione:** `npm run build`
+- **Esecuzione Test Suite (Vitest):** `npm run test`
+- **Linting:** `npm run lint`
+
+## Testing
+
+100% test coverage is the goal — tests make vibe coding safe.
+- Quando crei nuove funzioni o metodi matematici, scrivi un corrispondente test in `src/utils/db.test.ts`.
+- Quando correggi un bug, scrivi un regression test.
+- Quando aggiungi logiche condizionali (if/else), testa entrambi i rami.
+- Non caricare credenziali o chiavi API nei file di test.
+
+## Skill routing
+
+When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
+
+Key routing rules:
+- Product ideas/brainstorming → invoke /office-hours
+- Strategy/scope → invoke /plan-ceo-review
+- Architecture → invoke /plan-eng-review
+- Design system/plan review → invoke /design-consultation or /plan-design-review
+- Full review pipeline → invoke /autoplan
+- Bugs/errors → invoke /investigate
+- QA/testing site behavior → invoke /qa or /qa-only
+- Code review/diff check → invoke /review
+- Visual polish → invoke /design-review
+- Ship/deploy/PR → invoke /ship or /land-and-deploy
+- Save progress → invoke /context-save
+- Resume context → invoke /context-restore
+- Author a backlog-ready spec/issue → invoke /spec
