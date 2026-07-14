@@ -118,8 +118,7 @@ describe('Previso Replenishment Calculations', () => {
     const created = Database.addSupplier({
       name: 'Nuovo Fornitore S.r.l.',
       email: 'nuovo@fornitore.it',
-      phone: '+39 02 123456',
-      leadTimeDays: 7,
+      paymentTerms: '30 GG DF',
     });
 
     expect(created.id).toBeDefined();
