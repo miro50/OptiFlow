@@ -4,6 +4,19 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
+import { create, getNumericDate } from "https://deno.land/x/djwt@v2.8/mod.ts"
+
+// Generate cryptography key from JWT Secret
+async function getCryptoKey() {
+  const secret = Deno.env.get('JWT_SECRET') || 'fallback-secret-key-1234567890';
+  return await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"]
+  );
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -220,7 +233,62 @@ serve(async (req) => {
     }
 
     console.log("Database SKU stock quantities updated successfully");
-    return new Response(JSON.stringify({ success: true, updatedSKUsCount: updates.length }), {
+
+    // 1. Run replenishment engine
+    console.log(`Running replenishment engine for tenant: ${settings.tenant_id}...`);
+    const { data: engineResult, error: engineError } = await supabase.rpc('run_replenishment_engine', {
+      p_tenant_id: settings.tenant_id
+    });
+
+    let magicLink = null;
+    let whatsappSent = false;
+
+    if (engineError) {
+      console.error("Replenishment engine error:", engineError);
+    } else {
+      console.log(`Replenishment engine finished. Draft POs count: ${engineResult.draft_pos_count}`);
+      
+      // 2. Generate secure magic link if draft POs exist
+      if (engineResult.draft_pos_count > 0) {
+        const cryptoKey = await getCryptoKey();
+        const token = await create(
+          { alg: "HS256", typ: "JWT" },
+          { tenant_id: settings.tenant_id, exp: getNumericDate(2 * 60 * 60) }, // 2 hours expiration
+          cryptoKey
+        );
+        magicLink = `https://vlcffxunkcpxyoetrpxm.supabase.co/functions/v1/magic-approve?token=${token}`;
+
+        // 3. Simulate sending WhatsApp notification to settings.owner_phone
+        const ownerPhone = settings.owner_phone || '+39 333 1234567'; // Default for simulation
+        
+        let poDetailsText = '';
+        engineResult.pos.forEach((po: any) => {
+          poDetailsText += `\n - *${po.supplier_name}*: €${Number(po.total_amount).toLocaleString('it-IT', { minimumFractionDigits: 2 })} (${po.items_count} articoli)`;
+        });
+
+        console.log(`
+====== WHATSAPP PUSH SENT ======
+A: ${ownerPhone}
+Messaggio:
+Previso Autopilot ha calcolato le necessità di riordino odierne.${poDetailsText}
+
+Totale ordini: €${engineResult.pos.reduce((acc: number, po: any) => acc + Number(po.total_amount), 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+
+Rispondi *SI* o *APPROVA* a questo messaggio per inviare gli ordini, oppure vedi i dettagli ed approva da mobile qui:
+${magicLink}
+================================
+        `);
+        whatsappSent = true;
+      }
+    }
+
+    return new Response(JSON.stringify({ 
+      success: true, 
+      updatedSKUsCount: updates.length,
+      draftPOsCount: engineResult?.draft_pos_count || 0,
+      whatsappSent: whatsappSent,
+      magicLink: magicLink
+    }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
